@@ -1,16 +1,18 @@
+import eventlet
+eventlet.monkey_patch()  # MUST be at the very top before other imports
+
 from flask import Flask, request, jsonify, render_template, redirect, url_for, session
 from flask_socketio import SocketIO, emit
 from twilio.rest import Client
 from twilio.twiml.voice_response import VoiceResponse
 import os
-import time
 from datetime import datetime
 from dotenv import load_dotenv
 
 load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = os.getenv("SECRET_KEY", "supersecret")
+app.secret_key = os.getenv("SECRET_KEY", "supersecret")  # Use strong secret key in prod
 socketio = SocketIO(app)
 
 # Login credentials
@@ -24,7 +26,7 @@ TWILIO_NUMBER = os.getenv("TWILIO_PHONE_NUMBER")
 
 client = Client(TWILIO_SID, TWILIO_AUTH)
 
-# In-memory call log (can be made persistent later)
+# In-memory call logs; consider persistent storage for prod
 call_logs = []
 active_calls = {}
 
@@ -129,4 +131,5 @@ def handle_connect():
     print("Client connected")
 
 if __name__ == "__main__":
-    socketio.run(app, host="0.0.0.0", port=3000)
+    port = int(os.environ.get("PORT", 3000))
+    socketio.run(app, host="0.0.0.0", port=port)

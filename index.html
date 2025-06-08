@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Voice Call Dashboard</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+  <script src="https://cdn.socket.io/4.5.1/socket.io.min.js"></script>
+</head>
+<body>
+  <div class="container">
+    <a href="{{ url_for('logout') }}" class="logout-btn">Logout</a>
+    <h1>Voice Call Dashboard</h1>
+
+    <!-- Call Input -->
+    <section class="card">
+      <h2>Make a Call</h2>
+      <input id="phone_number" type="text" placeholder="Enter phone number" />
+      <button onclick="startCall()">Call Now</button>
+    </section>
+
+    <!-- Live Reply -->
+    <section class="card">
+      <h2>Live Text-to-Speech Reply</h2>
+      <input id="live_reply_text" type="text" placeholder="Type your reply here..." />
+      <button onclick="sendReply()">Send Reply</button>
+    </section>
+
+    <!-- Call Status -->
+    <section class="card" id="call_status_section" style="min-height: 50px;">
+      <h2>Call Status</h2>
+      <div id="call_status" class="status-message">No active call</div>
+    </section>
+
+    <!-- Call Timer -->
+    <section class="card">
+      <h2>Call Timer</h2>
+      <div id="call_timer">00:00</div>
+    </section>
+
+    <!-- Incoming Call -->
+    <section class="card" id="incoming_call_box" style="display:none;">
+      <h2>Incoming Call</h2>
+      <button onclick="acceptCall()">Accept</button>
+      <button onclick="rejectCall()">Reject</button>
+    </section>
+
+    <!-- Call Logs -->
+    <section class="card">
+      <h2>Call Logs</h2>
+      <ul id="call_logs">
+        {% for call in call_logs %}
+          <li id="log_{{ call.sid }}">{{ call.to }} - <strong>{{ call.status }}</strong></li>
+        {% else %}
+          <li>No calls yet.</li>
+        {% endfor %}
+      </ul>
+    </section>
+  </div>
+
+  <audio id="notif_sound" src="{{ url_for('static', filename='notify.mp3') }}"></audio>
+
+  <script>
+    const socket = io();
+    let currentCallSid = null;
+    let timerInterval = null;
+    let seconds = 0;
+
+    function startCall() {
+      const number = document.getElementById("phone_number").value.trim();
+      if (!number) {
+        alert("Please enter a phone number");
+        return;
+      }
+      fetch("/start_call", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ number }),
+      })
+      .then(res => res.json())
+      .then(data => {
+        if(data.sid) {
+          currentCallSid = data.sid;
+          updateCallStatus("initiated");
+          startTimer();
+        } else if(data.error) {
+          alert("Error: " + data.error);
+        }
+      });
+    }
+
+    function sendReply() {
+      if (!currentCallSid) {
+        alert("No active call to reply to");
+        return;
+      }
+      const message = document.getElementById("live_reply_text").value.trim();
+      if (!message) {
+        alert("Type a message to send");
+        return;
+      }
+      fetch("/send_voice", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message, call_sid: currentCallSid }),
+      });
+      document.getElementById("live_reply_text").value = "";
+    }
+
+    function updateCallStatus(status) {
+      const statusDiv = document.getElementById("call_status");
+      statusDiv.innerText = status.charAt(0).toUpperCase() + status.slice(1);
+      animateStatus(statusDiv);
+      playNotificationSound();
+    }
+
+    function animateStatus(element) {
+      element.style.opacity = 0;
+      let opacity = 0;
+      let increment = 0.05;
+      let anim = setInterval(() => {
+        opacity += increment;
+        element.style.opacity = opacity;
+        if (opacity >= 1) {
+          clearInterval(anim);
+          setTimeout(() => {
+            fadeOut(element);
+          }, 3000);
+        }
+      }, 50);
+    }
+
+    function fadeOut(element) {
+      let opacity = 1;
+      let decrement = 0.05;
+      let anim = setInterval(() => {
+        opacity -= decrement;
+        element.style.opacity = opacity;
+        if (opacity <= 0) {
+          clearInterval(anim);
+          element.innerText = "No active call";
+          element.style.opacity = 1;
+        }
+      }, 50);
+    }
+
+    function playNotificationSound() {
+      const sound = document.getElementById("notif_sound");
+      sound.currentTime = 0;
+      sound.play();
+    }
+
+    function startTimer() {
+      clearInterval(timerInterval);
+      seconds = 0;
+      document.getElementById("call_timer").innerText = "00:00";
+      timerInterval = setInterval(() => {
+        seconds++;
+        let m = String(Math.floor(seconds / 60)).padStart(2, "0");
+        let s = String(seconds % 60).padStart(2, "0");
+        document.getElementById("call_timer").innerText = `${m}:${s}`;
+      }, 1000);
+    }
+
+    function stopTimer() {
+      clearInterval(timerInterval);
+      document.getElementById("call_timer").innerText = "00:00";
+    }
+
+    // Handle incoming call accept/reject buttons
+    function acceptCall() {
+      if (!currentCallSid) return;
+      fetch("/accept_call", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sid: currentCallSid }),
+      }).then(() => {
+        updateCallStatus("answered");
+        startTimer();
+        document.getElementById("incoming_call_box").style.display = "none";
+      });
+    }
+
+    function rejectCall() {
+      if (!currentCallSid) return;
+      fetch("/reject_call", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sid: currentCallSid }),
+      }).then(() => {
+        updateCallStatus("completed");
+        stopTimer();
+        currentCallSid = null;
+        document.getElementById("incoming_call_box").style.display = "none";
+      });
+    }
+
+    // Update call logs live
+    function updateCallLog(call) {
+      let logItem = document.getElementById(`log_${call.sid}`);
+      if (!logItem) {
+        logItem = document.createElement("li");
+        logItem.id = `log_${call.sid}`;
+        document.getElementById("call_logs").prepend(logItem);
+      }
+      logItem.textContent = `${call.to} - ${call.status}`;
+    }
+
+    // Socket.IO listeners
+    socket.on("connect", () => {
+      console.log("Connected to server");
+    });
+
+    socket.on("call_logs", (logs) => {
+      const logsUl = document.getElementById("call_logs");
+      logsUl.innerHTML = "";
+      if (logs.length === 0) {
+        logsUl.innerHTML = "<li>No calls yet.</li>";
+      } else {
+        logs.forEach(call => {
+          const li = document.createElement("li");
+          li.id = `log_${call.sid}`;
+          li.textContent = `${call.to} - ${call.status}`;
+          logsUl.appendChild(li);
+        });
+      }
+    });
+
+    socket.on("status_update", (call) => {
+      console.log("Status update:", call);
+      updateCallLog(call);
+      updateCallStatus(call.status);
+
+      if(call.status === "ringing" && call.direction === "inbound") {
+        currentCallSid = call.sid;
+        document.getElementById("incoming_call_box").style.display = "block";
+        stopTimer();
+      }
+      else if(call.status === "answered") {
+        currentCallSid = call.sid;
+        document.getElementById("incoming_call_box").style.display = "none";
+        startTimer();
+      }
+      else if(call.status === "completed") {
+        if(call.sid === currentCallSid) {
+          stopTimer();
+          currentCallSid = null;
+        }
+        document.getElementById("incoming_call_box").style.display = "none";
+      }
+    });
+  </script>
+</body>
+</html>

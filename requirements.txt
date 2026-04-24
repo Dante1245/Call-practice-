@@ -1,7 +1,0 @@
-flask
-flask-socketio
-eventlet
-twilio
-requests
-python-dotenv
-gunicorn

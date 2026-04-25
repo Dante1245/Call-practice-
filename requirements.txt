@@ -1,0 +1,5 @@
+opencv-python>=4.10.0
+numpy>=1.26.0
+requests>=2.32.0
+mediapipe>=0.10.14
+pyvirtualcam>=0.11.0
